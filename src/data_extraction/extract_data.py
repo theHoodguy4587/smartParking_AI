@@ -26,6 +26,8 @@ DB_CONFIG = {
 # 2. SQL query
 # --------------------------------------------------
 
+EXCLUSIVE_END_DATE = "2024-05-09"
+
 QUERY = """
 SELECT
     id AS record_id,
@@ -52,6 +54,7 @@ FROM tbvehicleentry1
 
 WHERE locationid = 1
   AND intime IS NOT NULL
+  AND intime < %s::timestamp
 
 ORDER BY intime ASC;
 """
@@ -75,7 +78,7 @@ def extract_data():
 
         with connection.cursor() as cursor:
 
-            cursor.execute(QUERY)
+            cursor.execute(QUERY, (EXCLUSIVE_END_DATE,))
 
             records = cursor.fetchall()
 
@@ -92,8 +95,13 @@ def extract_data():
         # 4. Convert timestamps
         # --------------------------------------------------
 
-        df["entry_time"] = pd.to_datetime(df["entry_time"])
-        df["exit_time"] = pd.to_datetime(df["exit_time"])
+        df["entry_time"] = pd.to_datetime(df["entry_time"], errors="coerce")
+        df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
+
+        # Keep this guard even though the SQL query filters the same boundary.
+        # It protects the output if records are changed upstream or the query is adapted.
+        cutoff = pd.Timestamp(EXCLUSIVE_END_DATE)
+        df = df.loc[df["entry_time"].lt(cutoff)].copy()
 
         # --------------------------------------------------
         # 5. Derive parking duration in seconds
@@ -124,11 +132,7 @@ def extract_data():
         # 7. Export CSV
         # --------------------------------------------------
 
-        output_folder = (
-            Path(__file__).resolve().parent
-            / "data"
-            / "raw"
-        )
+        output_folder = Path(__file__).resolve().parents[2] / "data" / "raw"
 
         output_folder.mkdir(parents=True, exist_ok=True)
 
